@@ -19,28 +19,28 @@ const esp = new ESP8266_RGB('ESP IP ADDRESS', ESP PORT);
 If more than 1 command needs to be executed, or multiple pixels are modifyed its good to do that without updating the strip for every command.
 Updating the strip costs quite a lot of performance.
 
-## Methods
-### Neopixel (LED Strip)
-setPixel(pixel<Number>, rgb<RGBWObject>, draw<Boolean>) - Set the color of a single pixel
-setLine(x<Number>, y<Number>, rgb<RGBWObject>, draw<Boolean>) - Sets the color of all pixels from x to y
-setStrip(rgb<RGBWObject>, draw<Boolean>) - Sets the color of the entire strip
-setStripWhite(w<Number>,  draw<Boolean>) - Sets the strip wo its w color (r:0,g:0,g:0,w:w)
-clear() - Clears the strip
-show() - Updates the strip (same as if draw=true)
-### GPIO
-setGPIO_PIN_Mode(PIN<String>, MODE<Boolean>) - Set a GPIO pin to input (false) or output (true)
-setGPIO_PIN_StatePIN<String>, MODE<Boolean> - Set a GPIO pin state HIGH (true) or LOW (false)
-### Misc
-connect() - Connects to the ESP
-color(Color<String>) - Converts a color like "red" into its RGBW values
-rgb(r<Number>,g<Number>,b<Number>,w<Number>) - Converts to a RGBW object, used by the lib
-setPinMap(pinMap<BoardName>) - Ajusts the GPIO Pin names based on the board used
+## Methods  
+### Neopixel (LED Strip)  
+`setPixel(pixel<Number>, rgb<RGBWObject>, draw<Boolean>)` - Set the color of a single pixel  
+`setLine(x<Number>, y<Number>, rgb<RGBWObject>, draw<Boolean>)` - Sets the color of all pixels from x to y  
+`setStrip(rgb<RGBWObject>, draw<Boolean>)` - Sets the color of the entire strip  
+`setStripWhite(w<Number>,  draw<Boolean>)` - Sets the strip wo its w color (r:0,g:0,g:0,w:w)  
+`clear()` - Clears the strip  
+`show()` - Updates the strip (same as if draw=true)  
+### GPIO  
+`setGPIO_PIN_Mode(PIN<String>, MODE<Boolean>)` - Set a GPIO pin to input (false) or output (true)  
+`setGPIO_PIN_State(PIN<String>, MODE<Boolean>)` - Set a GPIO pin state HIGH (true) or LOW (false)  
+### Misc  
+`connect()` - Connects to the ESP  
+`color(Color<String>)` - Converts a color like "red" into its RGBW values  
+`rgb(r<Number>,g<Number>,b<Number>,w<Number>)` - Converts to a RGBW object, used by the lib  
+`setPinMap(pinMap<BoardName>)` - Ajusts the GPIO Pin names based on the board used  
 
 ## Events
-3 Events are emited (msg, pin, err).
-msg: Any message (like connected notificatin)
-pin: Updates on a GPIO pin status
-err: Any errors the ESP encounters
+3 Events are emited (msg, pin, err).  
+`msg`: Any message (like connected notificatin)  
+`pin`: Updates on a GPIO pin status  
+`err`: Any errors the ESP encounters  
 
 ## Large Example
 You can use a simple function to replicate delay() or wait() from other languages.
@@ -48,7 +48,7 @@ You can use a simple function to replicate delay() or wait() from other language
 const delay = (time) => new Promise(resolve => setTimeout(resolve, time));
 ```
 Examples:
-```
+```js
 const ESP8266_RGB = require('./index.js');
 const esp = new ESP8266_RGB('192.168.0.10', 81);
 const delay = (time) => new Promise(resolve => setTimeout(resolve, time));
