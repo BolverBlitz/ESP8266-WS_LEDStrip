@@ -25,8 +25,10 @@ Updating the strip costs quite a lot of performance.
 `setLine(x<Number>, y<Number>, rgb<RGBWObject>, draw<Boolean>)` - Sets the color of all pixels from x to y  
 `setStrip(rgb<RGBWObject>, draw<Boolean>)` - Sets the color of the entire strip  
 `setStripWhite(w<Number>,  draw<Boolean>)` - Sets the strip wo its w color (r:0,g:0,g:0,w:w)  
+`sendRaw(<String>)`- Send a string of RGBW values to the ESP (r,g,b,w,r,b,g,w,...)
 `clear()` - Clears the strip  
-`show()` - Updates the strip (same as if draw=true)  
+`show()` - Updates the strip (same as if draw=true) 
+`raw()` - Switch RAW Mode 
 ### GPIO  
 `setGPIO_PIN_Mode(PIN<String>, MODE<Boolean>)` - Set a GPIO pin to input (false) or output (true)  
 `setGPIO_PIN_State(PIN<String>, MODE<Boolean>)` - Set a GPIO pin state HIGH (true) or LOW (false)  
@@ -40,6 +42,7 @@ Updating the strip costs quite a lot of performance.
 3 Events are emited (msg, pin, err).  
 `msg`: Any message (like connected notificatin)  
 `pin`: Updates on a GPIO pin status  
+`raw`: Provides information if the raw mode is on/off  
 `err`: Any errors the ESP encounters  
 
 ## Large Example
@@ -89,6 +92,38 @@ esp.on('err', (pin) => {
     console.log(`Sent to ESP: ${response}`);  // Print the command
 
     await delay(1000); // Wait 1 second (1000ms)
+
+    response = await esp.raw();
+
+    console.log(`Sent to ESP: ${response}`);  // Print the command
+
+    await delay(1000); // Wait 1 second (1000ms)
+
+    const rawRot = "50,0,0,0"
+    const rawGün = "0,50,0,0"
+    const rawBlau = "0,0,50,0"
+    const colorObject = {
+        0: [rawRot, rawGün, rawBlau],
+        1: [rawGün, rawBlau, rawRot],
+        2: [rawBlau, rawRot, rawGün,]
+    }
+
+    let LED = Array(100);
+
+    for (let rounds = 0; rounds < 1000; rounds++) {
+        for (let y = 0; y < 100; y++) {
+            LED[y] = colorObject[rounds % 3][y % 3];
+        }
+        esp.sendRaw(LED.join(","));
+        await delay(1);
+    }
+
+    await delay(1000); // Wait 1 second (1000ms)
+
+    response = await esp.raw();
+    console.log(`Sent to ESP: ${response}`);  // Print the command
+
+    await delay(2000); // Wait 1 second (1000ms)
     
     esp.clear(); // Clear the strip
     process.exit(0); // Exit the smal example
