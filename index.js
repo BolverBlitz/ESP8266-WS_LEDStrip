@@ -23,7 +23,8 @@ class ESP8266_RGB extends EventEmitter {
 
         this.plainInstructions = {
             clear: "CLEAR",
-            show: "SHOW"
+            show: "SHOW",
+            raw: "RAW"
         };
 
         this.pinMap = "WeMOSD1_R1";
@@ -40,6 +41,12 @@ class ESP8266_RGB extends EventEmitter {
                 this.emit('err', {pin: revercedPIN[message.toString().split(":")[1].split(',')[0]], state: message.toString().split(":")[1].split(',')[1]});
                 return;
             }
+
+            if(message.toString().startsWith("RAW:")) {
+                this.emit('raw', {state: message.toString().split(":")[1]});
+                return;
+            }
+            
             this.emit('msg', message.toString());
         });
     }
@@ -218,22 +225,34 @@ class ESP8266_RGB extends EventEmitter {
 
     /**
      * Clears the strip
-     * @returns {String} command
      */
     clear = async () => {
-        const command = this.#generateInstruction('clear', 0, 0, 0, 0, 0, 0, 0)
+        const command = this.#generateInstruction('clear', 0, 0, 0, 0, 0, 0, 0);
         await this.#sendInstruction(command);
         return command;
     }
 
     /**
      * Shows the strip
-     * @returns {String} command
     */
     show = async () => {
-        const command = this.#generateInstruction('show', 0, 0, 0, 0, 0, 0, 0)
+        const command = this.#generateInstruction('show', 0, 0, 0, 0, 0, 0, 0);
         await this.#sendInstruction(command);
         return command;
+    }
+
+    /**
+     * Switch RAW Mode
+     */
+    raw = async () => {
+        const command = this.#generateInstruction('raw', 0, 0, 0, 0, 0, 0, 0);
+        await this.#sendInstruction(command);
+        return command;
+    }
+
+    sendRaw = async (raw) => {
+        await this.#sendInstruction(raw);
+        return;
     }
 }
 

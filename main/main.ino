@@ -30,6 +30,12 @@ int inputPins[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 int outputPins[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 int lastPinStates[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 
+char delimiter = ',';
+bool rawMode = false;
+bool debugMode = false;
+
+unsigned long startTime = millis();
+
 #define ELEMENTS(x) (sizeof(x) / sizeof(x[0]))
 
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(LEDS, PIN, NEO_GRBW + NEO_KHZ800);
@@ -68,132 +74,184 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
       }
       break;
     case WStype_TEXT:
+      startTime = millis();
       // Serial.printf("[%u] get Text: %s\n", num, payload);
       inPayload = String((char *)payload);
       //Serial.println(inPayload);
 
-      // Reset Strip
-
-      if (inPayload == "CLEAR") {
+      if (inPayload == "CLEAR") { // Reset Strip
         clearStrip();
-      } else if (inPayload == "SHOW")  // force show strip
-      {
+      } else if (inPayload == "SHOW") { // Force show strip
         strip.show();
+      } else if (inPayload == "DEBUG") {
+        if(debugMode) {
+          debugMode = false;
+        } else {
+          debugMode = true;
+        }
+      } else if (inPayload == "RAW") { // RAW Mode
+        if(rawMode) {
+          rawMode = false;
+          char message_data[8] = "RAW:OFF";
+          webSocket.broadcastTXT(message_data);
+          Serial.println("Raw Mode Off");
+        } else {
+          rawMode = true;
+          char message_data[8] = "RAW:ON";
+          webSocket.broadcastTXT(message_data);
+          Serial.println("Raw Mode On");
+        }
       } else {
 
-        // clear commas
-        // need to makr this use size of
-        for (int i = 0; i < ELEMENTS(commas); i++)
-          commas[i] = -1;
+        if(rawMode) {
+          
+          int pixelIndex = 0;
+          int colorIndex = 0;
+          uint8_t colors[4] = {0, 0, 0, 0};
 
-        // grab all comma positions
-        int commaIndex = 0;
-        for (int i = 0; i < inPayload.length(); i++) {
-          if (inPayload[i] == ',')
-            commas[commaIndex++] = i;
-        }
+          int startIndex = 0;
+          int commaIndex = inPayload.indexOf(delimiter);
 
-        /* commands
-            command: x, y, d?, r, g, b, w
-            0 = draw pixel -> Resiving
-            1 = draw line -> Resiving
-            2 = set strip -> Resiving
-            3 = set white strip -> Resiving
-            7 = emit PIN change -> Sending
-            8 = set Pin Mode -> Resiving
-            9 = setPin -> Resiving
-            */
+          while(commaIndex != -1) {
+            colors[colorIndex] = (uint8_t)inPayload.substring(startIndex, commaIndex).toInt();
 
-        // grab command
-        int commandSeperator = inPayload.indexOf(":");
-        command = inPayload.substring(0, commandSeperator).toInt();
-        // Serial.println(command);
-
-        x = inPayload.substring(commandSeperator + 1, commas[0]).toInt();
-        y = inPayload.substring(commas[0] + 1, commas[1]).toInt();
-
-        // Serial.print(x);
-
-        if (command == 0)  // draw pixel
-        {
-          d = inPayload.substring(commas[1] + 1).toInt();
-          r = inPayload.substring(commas[2] + 1, commas[3]).toInt();
-          g = inPayload.substring(commas[3] + 1, commas[4]).toInt();
-          b = inPayload.substring(commas[4] + 1, commas[5]).toInt();
-          w = inPayload.substring(commas[5] + 1).toInt();
-          strip.setPixelColor(x, strip.Color(r, g, b, w));
-          if (d == 1)
-            strip.show();
-        } else if (command == 1)  // draw line
-        {
-          d = inPayload.substring(commas[1] + 1).toInt();
-          r = inPayload.substring(commas[2] + 1, commas[3]).toInt();
-          g = inPayload.substring(commas[3] + 1, commas[4]).toInt();
-          b = inPayload.substring(commas[4] + 1, commas[5]).toInt();
-          w = inPayload.substring(commas[5] + 1).toInt();
-
-          for (int i = x; i < y; i++) {
-            strip.setPixelColor(i, strip.Color(r, g, b, w));
-          }
-
-          if (d == 1)
-            strip.show();
-        } else if (command == 2)  // set strip
-        {
-          d = inPayload.substring(commas[1] + 1).toInt();
-          r = inPayload.substring(commas[2] + 1, commas[3]).toInt();
-          g = inPayload.substring(commas[3] + 1, commas[4]).toInt();
-          b = inPayload.substring(commas[4] + 1, commas[5]).toInt();
-          w = inPayload.substring(commas[5] + 1).toInt();
-
-          for (int i = 0; i < LEDS; i++) {
-            strip.setPixelColor(i, strip.Color(r, g, b, w));
-          }
-
-          if (d == 1)
-            strip.show();
-        } else if (command == 3)  // set white strip
-        {
-          w = inPayload.substring(commas[5] + 1).toInt();
-          setWhiteStrip(w);
-        } else if (command == 8)  // set GPIO Pin Mode
-        {
-          if (y == 1) {
-            Serial.printf("[%u] PIN %d set to Out\n", x, avaiblePins[x]);
-            pinMode(avaiblePins[x], OUTPUT);
-            inputPins[x] = 0;
-            outputPins[x] = 1;
-          } else {
-            Serial.printf("[%u] PIN %d set to Inp\n", x, avaiblePins[x]);
-            pinMode(avaiblePins[x], INPUT);
-            inputPins[x] = 1;
-            outputPins[x] = 0;
-          }
-        } else if (command == 9)  // set GPIO Pin
-        {
-          if (outputPins[x] == 1) {
-            if (y == 1) {
-              Serial.printf("[%u] PIN %d set to HIGH\n", x, avaiblePins[x]);
-              digitalWrite(avaiblePins[x], HIGH);
-            } else {
-              Serial.printf("[%u] PIN %d set to LOW\n", x, avaiblePins[x]);
-              digitalWrite(avaiblePins[x], LOW);
+            colorIndex++;
+            if(colorIndex == 4) {
+              strip.setPixelColor(pixelIndex, strip.Color(colors[0], colors[1], colors[2], colors[3]));
+              pixelIndex++;
+              colorIndex = 0;
             }
-          } else {
-            sendErrorBrodcast(x, "PIN CAN`T BE SET! ITS NOT IN OUTPUT MODE");
+            startIndex = commaIndex + 1;
+            commaIndex = inPayload.indexOf(delimiter, startIndex);
           }
+          strip.show();
+
+          if(debugMode) {
+            unsigned long elapsedTime = millis() - startTime;
+
+            float fps = 1000.0 / elapsedTime; // FPS berechnen
+
+            char fpsMessage[32];
+            sprintf(fpsMessage, "FPS: %.2f", fps);
+            webSocket.broadcastTXT(fpsMessage);
+          }
+
+        } else {
+
+          // clear commas
+          // need to makr this use size of
+          for (int i = 0; i < ELEMENTS(commas); i++)
+            commas[i] = -1;
+
+          // grab all comma positions
+          int commaIndex = 0;
+          for (int i = 0; i < inPayload.length(); i++) {
+            if (inPayload[i] == ',')
+              commas[commaIndex++] = i;
+          }
+
+          /* commands
+              command: x, y, d?, r, g, b, w
+              0 = draw pixel -> Resiving
+              1 = draw line -> Resiving
+              2 = set strip -> Resiving
+              3 = set white strip -> Resiving
+              7 = emit PIN change -> Sending
+              8 = set Pin Mode -> Resiving
+              9 = setPin -> Resiving
+              */
+
+          // grab command
+          int commandSeperator = inPayload.indexOf(":");
+          command = inPayload.substring(0, commandSeperator).toInt();
+          // Serial.println(command);
+
+          x = inPayload.substring(commandSeperator + 1, commas[0]).toInt();
+          y = inPayload.substring(commas[0] + 1, commas[1]).toInt();
+
+          // Serial.print(x);
+
+          if (command == 0)  // draw pixel
+          {
+            d = inPayload.substring(commas[1] + 1).toInt();
+            r = inPayload.substring(commas[2] + 1, commas[3]).toInt();
+            g = inPayload.substring(commas[3] + 1, commas[4]).toInt();
+            b = inPayload.substring(commas[4] + 1, commas[5]).toInt();
+            w = inPayload.substring(commas[5] + 1).toInt();
+            strip.setPixelColor(x, strip.Color(r, g, b, w));
+            if (d == 1)
+              strip.show();
+          } else if (command == 1)  // draw line
+          {
+            d = inPayload.substring(commas[1] + 1).toInt();
+            r = inPayload.substring(commas[2] + 1, commas[3]).toInt();
+            g = inPayload.substring(commas[3] + 1, commas[4]).toInt();
+            b = inPayload.substring(commas[4] + 1, commas[5]).toInt();
+            w = inPayload.substring(commas[5] + 1).toInt();
+
+            for (int i = x; i < y; i++) {
+              strip.setPixelColor(i, strip.Color(r, g, b, w));
+            }
+
+            if (d == 1)
+              strip.show();
+          } else if (command == 2)  // set strip
+          {
+            d = inPayload.substring(commas[1] + 1).toInt();
+            r = inPayload.substring(commas[2] + 1, commas[3]).toInt();
+            g = inPayload.substring(commas[3] + 1, commas[4]).toInt();
+            b = inPayload.substring(commas[4] + 1, commas[5]).toInt();
+            w = inPayload.substring(commas[5] + 1).toInt();
+
+            for (int i = 0; i < LEDS; i++) {
+              strip.setPixelColor(i, strip.Color(r, g, b, w));
+            }
+
+            if (d == 1)
+              strip.show();
+          } else if (command == 3)  // set white strip
+          {
+            w = inPayload.substring(commas[5] + 1).toInt();
+            setWhiteStrip(w);
+          } else if (command == 8)  // set GPIO Pin Mode
+          {
+            if (y == 1) {
+              Serial.printf("[%u] PIN %d set to Out\n", x, avaiblePins[x]);
+              pinMode(avaiblePins[x], OUTPUT);
+              inputPins[x] = 0;
+              outputPins[x] = 1;
+            } else {
+              Serial.printf("[%u] PIN %d set to Inp\n", x, avaiblePins[x]);
+              pinMode(avaiblePins[x], INPUT);
+              inputPins[x] = 1;
+              outputPins[x] = 0;
+            }
+          } else if (command == 9)  // set GPIO Pin
+          {
+            if (outputPins[x] == 1) {
+              if (y == 1) {
+                Serial.printf("[%u] PIN %d set to HIGH\n", x, avaiblePins[x]);
+                digitalWrite(avaiblePins[x], HIGH);
+              } else {
+                Serial.printf("[%u] PIN %d set to LOW\n", x, avaiblePins[x]);
+                digitalWrite(avaiblePins[x], LOW);
+              }
+            } else {
+              sendErrorBrodcast(x, "PIN CAN`T BE SET! ITS NOT IN OUTPUT MODE");
+            }
+          }
+
+          // Serial.print("X: ");
+          // Serial.println(x);
+          // Serial.print("Y: ");
+          // Serial.println(y);
+          // Serial.print("Colour: ");
+          // Serial.println(colour, HEX);
         }
 
-        // Serial.print("X: ");
-        // Serial.println(x);
-        // Serial.print("Y: ");
-        // Serial.println(y);
-        // Serial.print("Colour: ");
-        // Serial.println(colour, HEX);
+        // send data to all connected clients
+        // webSocket.broadcastTXT("message here");
       }
-
-      // send data to all connected clients
-      // webSocket.broadcastTXT("message here");
       break;
     case WStype_BIN:
       Serial.printf("[%u] get binary length: %u\n", num, length);
