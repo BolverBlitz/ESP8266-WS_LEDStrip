@@ -8,6 +8,7 @@
 
 #include <ESP8266WiFi.h>
 #include <WebSocketsServer.h>
+#include <WiFiUDP.h>
 #include <Hash.h>
 
 #include <Ticker.h>
@@ -25,6 +26,10 @@
 #define PIN 2
 #define LEDS 300
 
+// A UDP instance to let us send and receive packets over UDP
+WiFiUDP Udp;
+char packet_buf[1024*2];
+
 const int avaiblePins[9] = { D0, D1, D2, D3, D4, D5, D6, D7, D8 };
 int inputPins[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 int outputPins[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
@@ -33,10 +38,12 @@ int lastPinStates[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 char delimiter = ',';
 bool rawMode = false;
 bool debugMode = false;
+bool udpMode = false;
 
 unsigned long startTime = millis();
 
 #define ELEMENTS(x) (sizeof(x) / sizeof(x[0]))
+#define PACKET_SZ ((LEDS * 4) + 3)
 
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(LEDS, PIN, NEO_GRBW + NEO_KHZ800);
 
@@ -71,6 +78,10 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
 
         // send message to client
         webSocket.sendTXT(num, "Connected");
+        char buffer[100];
+        sprintf(buffer, "INFO:UDP.%s,RAW.%s,DEBUG.%s", udpMode ? "true" : "false", rawMode ? "true" : "false", debugMode ? "true" : "false");
+        webSocket.sendTXT(num, buffer);
+
       }
       break;
     case WStype_TEXT:
@@ -79,18 +90,28 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
       inPayload = String((char *)payload);
       //Serial.println(inPayload);
 
-      if (inPayload == "CLEAR") { // Reset Strip
+      if (inPayload == "CLEAR") {  // Reset Strip
         clearStrip();
-      } else if (inPayload == "SHOW") { // Force show strip
+      } else if (inPayload == "SHOW") {  // Force show strip
         strip.show();
+      } else if (inPayload == "STATUS") {
+        char buffer[100];
+        sprintf(buffer, "INFO:UDP.%s,RAW.%s,DEBUG.%s", udpMode ? "true" : "false", rawMode ? "true" : "false", debugMode ? "true" : "false");
+        webSocket.sendTXT(num, buffer);
       } else if (inPayload == "DEBUG") {
-        if(debugMode) {
+        if (debugMode) {
           debugMode = false;
         } else {
           debugMode = true;
         }
-      } else if (inPayload == "RAW") { // RAW Mode
-        if(rawMode) {
+      } else if (inPayload == "UDP") {
+        if (!udpMode) {
+          udpMode = true;
+          char message_data[8] = "UDP:ON";
+          webSocket.broadcastTXT(message_data);
+        }
+      }else if (inPayload == "RAW") {  // RAW Mode
+        if (rawMode) {
           rawMode = false;
           char message_data[8] = "RAW:OFF";
           webSocket.broadcastTXT(message_data);
@@ -103,20 +124,20 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
         }
       } else {
 
-        if(rawMode) {
-          
+        if (rawMode) {
+
           int pixelIndex = 0;
           int colorIndex = 0;
-          uint8_t colors[4] = {0, 0, 0, 0};
+          uint8_t colors[4] = { 0, 0, 0, 0 };
 
           int startIndex = 0;
           int commaIndex = inPayload.indexOf(delimiter);
 
-          while(commaIndex != -1) {
+          while (commaIndex != -1) {
             colors[colorIndex] = (uint8_t)inPayload.substring(startIndex, commaIndex).toInt();
 
             colorIndex++;
-            if(colorIndex == 4) {
+            if (colorIndex == 4) {
               strip.setPixelColor(pixelIndex, strip.Color(colors[0], colors[1], colors[2], colors[3]));
               pixelIndex++;
               colorIndex = 0;
@@ -126,10 +147,10 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length)
           }
           strip.show();
 
-          if(debugMode) {
+          if (debugMode) {
             unsigned long elapsedTime = millis() - startTime;
 
-            float fps = 1000.0 / elapsedTime; // FPS berechnen
+            float fps = 1000.0 / elapsedTime;  // FPS berechnen
 
             char fpsMessage[32];
             sprintf(fpsMessage, "FPS: %.2f", fps);
@@ -300,6 +321,8 @@ void setup() {
   strip.begin();
   yield();
 
+  Udp.begin(82);
+
   clearStrip();
 
   // Set WiFi to station mode and disconnect from an AP if it was Previously
@@ -313,6 +336,7 @@ void setup() {
   Serial.println(ssid);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
+    strip.setPixelColor(0, strip.Color(25, 0, 0, 0)); // Set LED red to indicate connection not yet made
     Serial.print(".");
     delay(500);
   }
@@ -322,33 +346,79 @@ void setup() {
   IPAddress ip = WiFi.localIP();
   Serial.println(ip);
 
+  // Light up LED green to indicate successful connection:
+  strip.setPixelColor(0, strip.Color(0, 25, 0, 0));
+  delay(500);
+  strip.setPixelColor(0, strip.Color(0, 0, 0, 0));
+
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
 }
 
 void loop() {
+  // Handle WebSocket messages
   webSocket.loop();
-  //Serial.println(digitalRead(avaiblePins[3]));
-  for (int i = 0; i < sizeof(avaiblePins); i++) {
-    if (inputPins[i] == 1) {  // Check if PIN is in input Mode (Set by instruction 8)
-      int PinVal = digitalRead(avaiblePins[i]);
-      if (PinVal != lastPinStates[i]) {  // Check PINs last state and if its changed we emit a message
-        char pinChar[8];
-        char valueChar[8];
-        // Int -> char*
-        itoa(PinVal, valueChar, 10);
-        itoa(i, pinChar, 10);
-        itoa(PinVal, valueChar, 10);
 
-        char message_data[100] = "7:";
-        //combining data
-        strcat(message_data, pinChar);
-        strcat(message_data, ",");
-        strcat(message_data, valueChar);
-        strcat(message_data, ",0,0,0,0,0,0");
+  if (udpMode) {
+    int noBytes = Udp.parsePacket();
 
+    if (noBytes) {
+      // Serial.print("Received ");
+      // Serial.print(noBytes);
+      // Serial.print(" bytes\r\n");
+      Udp.read(packet_buf, noBytes);
+
+      if (noBytes == PACKET_SZ && packet_buf[0] == 0xAA) {
+        unsigned short sum = 0;
+        int checksum_0 = PACKET_SZ - 2;
+        int checksum_1 = PACKET_SZ - 1;
+
+        for (int i = 0; i < checksum_0; i++) {
+          sum += packet_buf[i];
+        }
+
+        //Test if valid write packet
+        if ((((unsigned short)packet_buf[checksum_0] << 8) | packet_buf[checksum_1]) == sum) {
+          for (int i = 0; i < LEDS; i++) {
+            int idx = 1 + (4 * i);
+
+            strip.setPixelColor(i, strip.Color(packet_buf[idx], packet_buf[idx + 1], packet_buf[idx + 2], packet_buf[idx + 3]));
+          }
+          strip.show();
+        }
+      } else if (noBytes == 2 && packet_buf[0] == 0xAB) {
+        udpMode = false;
+        char message_data[8] = "UDP:OFF";
         webSocket.broadcastTXT(message_data);
-        lastPinStates[i] = PinVal;
+      } else if (noBytes == 2 && packet_buf[0] == 0xAC){
+        char buffer[100];
+        sprintf(buffer, "INFO:UDP.%s,RAW.%s,DEBUG.%s", udpMode ? "true" : "false", rawMode ? "true" : "false", debugMode ? "true" : "false");
+        webSocket.broadcastTXT(buffer);
+      }
+    }
+  } else {
+    //Serial.println(digitalRead(avaiblePins[3]));
+    for (int i = 0; i < sizeof(avaiblePins); i++) {
+      if (inputPins[i] == 1) {  // Check if PIN is in input Mode (Set by instruction 8)
+        int PinVal = digitalRead(avaiblePins[i]);
+        if (PinVal != lastPinStates[i]) {  // Check PINs last state and if its changed we emit a message
+          char pinChar[8];
+          char valueChar[8];
+          // Int -> char*
+          itoa(PinVal, valueChar, 10);
+          itoa(i, pinChar, 10);
+          itoa(PinVal, valueChar, 10);
+
+          char message_data[100] = "7:";
+          //combining data
+          strcat(message_data, pinChar);
+          strcat(message_data, ",");
+          strcat(message_data, valueChar);
+          strcat(message_data, ",0,0,0,0,0,0");
+
+          webSocket.broadcastTXT(message_data);
+          lastPinStates[i] = PinVal;
+        }
       }
     }
   }

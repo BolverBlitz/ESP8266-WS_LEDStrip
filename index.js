@@ -1,4 +1,5 @@
 const WebSocket = require('ws');
+const client = require('dgram').createSocket('udp4');
 const EventEmitter = require('events');
 
 class ESP8266_RGB extends EventEmitter {
@@ -10,7 +11,14 @@ class ESP8266_RGB extends EventEmitter {
         super();
         this.ws = new WebSocket(`ws://${ip}:${port}`);
 
+        this.remote_ip = ip;
+        this.remote_port = port;
+
         this.isConnected = false;
+
+        this.state_raw = false;
+        this.state_udp = false;
+        this.state_debug = false;
 
         this.instructions = {
             setPixel: 0,
@@ -24,29 +32,53 @@ class ESP8266_RGB extends EventEmitter {
         this.plainInstructions = {
             clear: "CLEAR",
             show: "SHOW",
-            raw: "RAW"
+            state: "STATE",
+            raw: "RAW",
+            debug: "DEBUG",
+            udp: "UDP"
         };
 
         this.pinMap = "WeMOSD1_R1";
 
         this.ws.on('message', (message) => {
-            if(message.toString().startsWith("7:")) {
+            // Handle PIN Events
+            if (message.toString().startsWith("7:")) {
                 const revercedPIN = this.#reverceObject(this.PINS[this.pinMap]);
-                this.emit('pin', {pin: revercedPIN[message.toString().split(":")[1].split(',')[0]], state: message.toString().split(":")[1].split(',')[1]});
+                this.emit('pin', { pin: revercedPIN[message.toString().split(":")[1].split(',')[0]], state: message.toString().split(":")[1].split(',')[1] });
                 return;
             }
+            // Handle State Events (Update the in class state)
+            if (message.toString().startsWith("INFO:")) {
+                message.toString().split(":")[1].split(",").forEach(state => {
+                    let [key, value] = state.split('.');
+                    value = value === 'true';
 
-            if(message.toString().startsWith("ERROR:")) {
+                    switch (key) {
+                        case 'UDP':
+                            this.state_udp = value;
+                            break;
+                        case 'RAW':
+                            this.state_raw = value;
+                            break;
+                        case 'DEBUG':
+                            this.state_debug = value;
+                            break;
+                    }
+                });
+                return;
+            }
+            // Handle Error Events
+            if (message.toString().startsWith("ERROR:")) {
                 const revercedPIN = this.#reverceObject(this.PINS[this.pinMap]);
-                this.emit('err', {pin: revercedPIN[message.toString().split(":")[1].split(',')[0]], state: message.toString().split(":")[1].split(',')[1]});
+                this.emit('err', { pin: revercedPIN[message.toString().split(":")[1].split(',')[0]], state: message.toString().split(":")[1].split(',')[1] });
                 return;
             }
-
-            if(message.toString().startsWith("RAW:")) {
-                this.emit('raw', {state: message.toString().split(":")[1]});
+            // Handle RAW Events
+            if (message.toString().startsWith("RAW:")) {
+                this.emit('raw', { state: message.toString().split(":")[1] });
                 return;
             }
-            
+            // Handle the rest
             this.emit('msg', message.toString());
         });
     }
@@ -68,10 +100,15 @@ class ESP8266_RGB extends EventEmitter {
     #reverceObject = obj => Object.fromEntries(Object.entries(obj).map(([k, v]) => [v, k]))
 
     #generateInstruction(instruction, start, end, draw, r, g, b, w) {
-        if(instruction in this.plainInstructions) return this.plainInstructions[instruction];
+        if (instruction in this.plainInstructions) return this.plainInstructions[instruction];
         return `${this.instructions[instruction]}:${start},${end},${draw},${r},${g},${b},${w}`;
     };
 
+    /**
+     * Sends a instruction
+     * @param {String} instruction 
+     * @returns 
+     */
     #sendInstruction(instruction) {
         return new Promise((resolve, reject) => {
             this.ws.send(instruction, (error) => {
@@ -84,9 +121,96 @@ class ESP8266_RGB extends EventEmitter {
         });
     };
 
+    /**
+     * Sends a instruction and waits for the callback
+     * @param {String} instruction instruction to send
+     * @param {String} callback Expected callback String
+     * @returns 
+     */
+    #sendInstructionCallback(instruction, callback) {
+        return new Promise((resolve, reject) => {
+            // Create Event Listener function
+            const messageListener = (message) => {
+                if (message.toString() === callback) {
+                    this.ws.off('message', messageListener);
+                    resolve();
+                }
+            };
+
+            this.ws.send(instruction, (err) => {
+                if (err) {
+                    this.ws.off('message', messageListener);
+                    reject(err);
+                }
+            });
+
+            const timeoutTimeout = setTimeout(() => {
+                this.ws.off('message', messageListener)
+                clearTimeout(timeoutTimeout);
+                reject(new Error('Timeout'));
+            }, 5000);
+
+            // Add Event Listener
+            this.ws.on('message', messageListener);
+        });
+    }
+
+    /**
+     * Send a RGBW UDP packet
+     * @param {Array} rgbw_values 
+     */
+    sendUDPPacket = (rgbw_values) => {
+        if(!this.state_udp) throw new Error('UDP is not enabled');
+        // Convert the RGBW array to a byte array
+        const rgbw_bytes = rgbw_values.flatMap(value => {
+            const [r, g, b, w] = value.split(',').map(Number);
+            return [r, g, b, w];
+        });
+    
+        let buffer = Buffer.alloc(1 + rgbw_bytes.length + 2);
+        buffer[0] = 0xAA;
+        rgbw_bytes.forEach((value, i) => {
+            buffer[i + 1] = value;
+        });
+    
+        let sum = 0; // Calculate the checksum
+        for (let i = 0; i < buffer.length - 2; i++) {
+            sum += buffer[i];
+        }
+        buffer[buffer.length - 2] = sum >> 8; // high byte
+        buffer[buffer.length - 1] = sum & 0xFF; // low byte
+    
+        client.send(buffer, this.remote_port + 1, this.remote_ip, (err) => {
+            if (err) console.error('Error sending UDP packet:', err);
+        });
+    }
+    
+    /**
+     * Send a UDP instruction packet, you should always send a getState packet after a instruction packet to keel the state in sync
+     * @param {String} instruction 
+     */
+    sendUDPInstructionPacket = (instruction) => {
+        if(!this.state_udp) throw new Error('UDP is not enabled');
+        const instruction_bytes = {
+            'udp': 0xAB,
+            'getState': 0xAC,
+        }
+    
+        if(!instruction_bytes.hasOwnProperty(instruction)) throw new Error('Instruction not found');
+    
+        let buffer = Buffer.alloc(2);
+        buffer[0] = instruction_bytes[instruction]; // Set the instruction byte
+        buffer[1] = 0x00;
+    
+        // Senden Sie das Paket an das Zielgerät
+        client.send(buffer, this.remote_port + 1, this.remote_ip, (err) => {
+            if (err) console.error('Error sending UDP packet:', err);
+        });
+    }
+
     connect() {
         return new Promise((resolve, reject) => {
-            this.ws.on('open', (message) => {
+            this.ws.on('open', () => {
                 this.isConnected = true;
                 resolve(true);
             });
@@ -153,6 +277,7 @@ class ESP8266_RGB extends EventEmitter {
      * @returns {String} command
      */
     setPixel = async (x, rgb, draw = true) => {
+        if(this.state_udp) throw new Error('UDP is enabled, sending WS commands is not possible');
         const { r, g, b, w } = rgb;
         const command = this.#generateInstruction('setPixel', x, 0, draw === true ? 1 : 0, r, g, b, w)
         await this.#sendInstruction(command);
@@ -168,6 +293,7 @@ class ESP8266_RGB extends EventEmitter {
      * @returns {String} command
      */
     setLine = async (x, y, rgb, draw = true) => {
+        if(this.state_udp) throw new Error('UDP is enabled, sending WS commands is not possible');
         const { r, g, b, w } = rgb;
         const command = this.#generateInstruction('setLine', x, y, draw === true ? 1 : 0, r, g, b, w)
         await this.#sendInstruction(command);
@@ -181,6 +307,7 @@ class ESP8266_RGB extends EventEmitter {
      * @returns {String} command
      */
     setStrip = async (rgb, draw = true) => {
+        if(this.state_udp) throw new Error('UDP is enabled, sending WS commands is not possible');
         const { r, g, b, w } = rgb;
         const command = this.#generateInstruction('setStrip', 0, 0, draw === true ? 1 : 0, r, g, b, w)
         await this.#sendInstruction(command);
@@ -194,6 +321,7 @@ class ESP8266_RGB extends EventEmitter {
      * @returns 
      */
     setStripWhite = async (w, draw = true) => {
+        if(this.state_udp) throw new Error('UDP is enabled, sending WS commands is not possible');
         const command = this.#generateInstruction('setStripWhite', 0, 0, draw === true ? 1 : 0, 0, 0, 0, w)
         await this.#sendInstruction(command);
         return command;
@@ -206,6 +334,7 @@ class ESP8266_RGB extends EventEmitter {
      * @returns 
      */
     setGPIO_PIN_Mode = async (pin, mode) => {
+        if(this.state_udp) throw new Error('UDP is enabled, sending WS commands is not possible');
         const command = `${this.instructions["GPIO_PIN_MODE"]}:${pin},${mode === true ? 1 : 0},0,0,0,0,0,0`;
         await this.#sendInstruction(command);
         return command;
@@ -218,6 +347,7 @@ class ESP8266_RGB extends EventEmitter {
      * @returns 
      */
     setGPIO_PIN_State = async (pin, state) => {
+        if(this.state_udp) throw new Error('UDP is enabled, sending WS commands is not possible');
         const command = `${this.instructions["GPIO_PIN_STATE"]}:${pin},${state === true ? 1 : 0},0,0,0,0,0,0`;
         await this.#sendInstruction(command);
         return command;
@@ -227,6 +357,7 @@ class ESP8266_RGB extends EventEmitter {
      * Clears the strip
      */
     clear = async () => {
+        if(this.state_udp) throw new Error('UDP is enabled, sending WS commands is not possible');
         const command = this.#generateInstruction('clear', 0, 0, 0, 0, 0, 0, 0);
         await this.#sendInstruction(command);
         return command;
@@ -236,7 +367,28 @@ class ESP8266_RGB extends EventEmitter {
      * Shows the strip
     */
     show = async () => {
+        if(this.state_udp) throw new Error('UDP is enabled, sending WS commands is not possible');
         const command = this.#generateInstruction('show', 0, 0, 0, 0, 0, 0, 0);
+        await this.#sendInstruction(command);
+        return command;
+    }
+
+    /**
+     * Get the current state of the ESP Settings
+     */
+    getState = async () => {
+        if(this.state_udp) throw new Error('UDP is enabled, sending WS commands is not possible. Use sendUDPInstructionPacket("getState") instead');
+        const command = this.#generateInstruction('state', 0, 0, 0, 0, 0, 0, 0);
+        await this.#sendInstruction(command);
+        return command;
+    }
+
+    /**
+     * Switch DEBUG Mode
+     */
+    debug = async () => {
+        if(this.state_udp) throw new Error('UDP is enabled, sending WS commands is not possible');
+        const command = this.#generateInstruction('debug', 0, 0, 0, 0, 0, 0, 0);
         await this.#sendInstruction(command);
         return command;
     }
@@ -245,14 +397,28 @@ class ESP8266_RGB extends EventEmitter {
      * Switch RAW Mode
      */
     raw = async () => {
+        if(this.state_udp) throw new Error('UDP is enabled, sending WS commands is not possible');
         const command = this.#generateInstruction('raw', 0, 0, 0, 0, 0, 0, 0);
         await this.#sendInstruction(command);
         return command;
     }
 
     sendRaw = async (raw) => {
+        if(this.state_udp) throw new Error('UDP is enabled, sending WS commands is not possible');
+        if(!this.state_raw) throw new Error('RAW is not enabled');
         await this.#sendInstruction(raw);
         return;
+    }
+
+    /**
+     * Switch to UDP Mode
+     */
+    udpSafe = async () => {
+        if(this.state_udp) throw new Error('UDP is enabled, sending WS commands is not possible');
+        const command = this.#generateInstruction('udp', 0, 0, 0, 0, 0, 0, 0);
+        await this.#sendInstructionCallback(command, "UDP:ON");
+        this.state_udp = true;
+        return command;
     }
 }
 
