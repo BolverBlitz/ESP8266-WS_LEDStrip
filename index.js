@@ -81,6 +81,17 @@ class ESP8266_RGB extends EventEmitter {
             // Handle the rest
             this.emit('msg', message.toString());
         });
+
+        this.ws.on('close', () => {
+            this.isConnected = false;
+            this.emit('ws_close');
+        });
+
+        this.ws.on('error', (error) => {
+            this.isConnected = false;
+            this.emit('ws_close');
+            console.error(error);
+        });
     }
 
     PINS = {

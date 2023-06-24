@@ -26,9 +26,12 @@ Updating the strip costs quite a lot of performance.
 `setStrip(rgb<RGBWObject>, draw<Boolean>)` - Sets the color of the entire strip  
 `setStripWhite(w<Number>,  draw<Boolean>)` - Sets the strip wo its w color (r:0,g:0,g:0,w:w)  
 `sendRaw(<String>)`- Send a string of RGBW values to the ESP (r,g,b,w,r,b,g,w,...)
-`clear()` - Clears the strip  
-`show()` - Updates the strip (same as if draw=true) 
-`raw()` - Switch RAW Mode 
+`clear()` - Clears the strip   
+`show()` - Updates the strip (same as if draw=true)  
+`raw()` - Switch RAW Mode  
+`udpSafe()` - Switch to UDP Mode  
+`sendUDPPacket(<String>)` - Send a UDP Packet to the ESP (r,g,b,w,r,b,g,w,...)  
+`sendUDPInstructionPacket(<String>)` - Send a UDP Instruction Packet  
 ### GPIO  
 `setGPIO_PIN_Mode(PIN<String>, MODE<Boolean>)` - Set a GPIO pin to input (false) or output (true)  
 `setGPIO_PIN_State(PIN<String>, MODE<Boolean>)` - Set a GPIO pin state HIGH (true) or LOW (false)  
@@ -44,6 +47,21 @@ Updating the strip costs quite a lot of performance.
 `pin`: Updates on a GPIO pin status  
 `raw`: Provides information if the raw mode is on/off  
 `err`: Any errors the ESP encounters  
+
+## Modes explained
+### Default Mode
+You get all advantages of webcockets you would expect.  
+In default you can only set a pixel, draw a line or set all LEDs with one command.
+### RAW Mode
+You get all advantages of webcockets you would expect.  
+In RAW Mode you can send a string of RGBW values to the ESP (r,g,b,w,r,b,g,w,...).  
+The ESP will still handle all normal commands send in default mode.
+You can always switch back to default mode by calling `raw()`.  
+### UDP Mode
+WARNING: This mode can cause the ESP to crash if you flood it with data. Please only send up to 240 Packets per second (If 160MHZ is used). A sidenote, transmitting data will only be checked with a sum, therfor it can´t detect bitflips. UDP data is processed in the order of arrival, not in the order of sending.
+In UDP Mode you can send a Array of RGBW values to the ESP (["r,g,b,w"],["r,g,b,w"],...) via UDP.  
+The ESP will keel WS connection open but will not handle any commands send via WS. They will build up in a queue and and will be executed once UDP Mode is disabled, however this can fill up the ESPs memory. Therfor its not allowed to send data via WS and you get a error if you try.  
+You can always switch back to default mode by sending a special UDP packet via `sendUDPInstructionPacket(<String>)`.
 
 ## Large Example
 You can use a simple function to replicate delay() or wait() from other languages.
