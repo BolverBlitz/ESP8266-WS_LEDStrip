@@ -337,6 +337,7 @@ void setup() {
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     strip.setPixelColor(0, strip.Color(25, 0, 0, 0)); // Set LED red to indicate connection not yet made
+    strip.show();
     Serial.print(".");
     delay(500);
   }
@@ -348,8 +349,10 @@ void setup() {
 
   // Light up LED green to indicate successful connection:
   strip.setPixelColor(0, strip.Color(0, 25, 0, 0));
+  strip.show();
   delay(500);
   strip.setPixelColor(0, strip.Color(0, 0, 0, 0));
+  strip.show();
 
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
