@@ -103,9 +103,9 @@ void loop() {
   int noBytes = Udp.parsePacket();
 
   if (noBytes) {
-    Serial.print("Received ");
-    Serial.print(noBytes);
-    Serial.print(" bytes\r\n");
+    //Serial.print("Received ");
+    //Serial.print(noBytes);
+    //Serial.print(" bytes\r\n");
     Udp.read(packet_buf, noBytes);
 
     if (noBytes == PACKET_SZ && packet_buf[0] == 0xAA) {
@@ -124,16 +124,16 @@ void loop() {
         }
         strip.show();
       } else {
-        Serial.print("CRC mismatch: received ");
-        Serial.print(receivedCrc, HEX);
-        Serial.print(", calculated ");
-        Serial.println(calculatedCrc, HEX);
+        //Serial.print("CRC mismatch: received ");
+        //Serial.print(receivedCrc, HEX);
+        //Serial.print(", calculated ");
+        //Serial.println(calculatedCrc, HEX);
       }
     } else if (noBytes != PACKET_SZ) {
-      Serial.print("Unexpected packet size: ");
-      Serial.println(noBytes);
+      //Serial.print("Unexpected packet size: ");
+      //Serial.println(noBytes);
     } else if (packet_buf[0] != 0xAA) {
-      Serial.println("Invalid start byte");
+      //Serial.println("Invalid start byte");
     }
   }
 }
